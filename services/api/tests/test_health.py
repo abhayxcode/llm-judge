@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-
 from judge_api.config import Settings
 from judge_api.main import create_app
 

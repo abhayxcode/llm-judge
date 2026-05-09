@@ -44,6 +44,22 @@ down: ## Tear down dev containers
 down-volumes: ## Tear down dev containers AND wipe volumes
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 
+# ---- Migrations + bootstrap ----
+.PHONY: migrate
+migrate: migrate-pg migrate-ch ## Apply PG + CH migrations
+
+.PHONY: migrate-pg
+migrate-pg: ## Apply Postgres migrations (alembic upgrade head)
+	cd services/api && $(UV) run judge-cli migrate-pg
+
+.PHONY: migrate-ch
+migrate-ch: ## Apply ClickHouse SQL migrations (idempotent)
+	cd services/api && $(UV) run judge-cli migrate-ch
+
+.PHONY: bootstrap
+bootstrap: ## Create default org/project/api_key (prints API key once)
+	cd services/api && $(UV) run judge-cli bootstrap
+
 .PHONY: logs
 logs: ## Tail logs from all dev containers
 	$(COMPOSE) -f $(COMPOSE_FILE) logs -f --tail=100
