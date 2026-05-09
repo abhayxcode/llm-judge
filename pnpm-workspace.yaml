@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "packages/sdk-ts"
+  - "packages/proto"
+  - "packages/ui"
