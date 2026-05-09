@@ -1,0 +1,19 @@
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - unconvert
+    - misspell
+    - gosec
+
+issues:
+  exclude-dirs:
+    - vendor
