@@ -1,0 +1,74 @@
+# Project-local docs are intentionally outside version control.
+.docs/
+.docs
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+.next/
+.turbo/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Python / uv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.uv/
+.python-version
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Go
+bin/
+*.exe
+*.test
+*.out
+go.work
+go.work.sum
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data (docker volumes, exports)
+data/
+tmp/
+*.log
+
+# Build artifacts
+*.tar
+*.tar.gz
+*.zip
+
+# Helm
+deploy/helm/charts/*.tgz
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS
+Thumbs.db
