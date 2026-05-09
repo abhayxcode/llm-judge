@@ -1,0 +1,13 @@
+LLM Judge
+Copyright (C) 2026 LLM Judge contributors
+
+This product includes software developed by the LLM Judge contributors.
+
+The server-side components are licensed under the GNU Affero General Public
+License v3.0 or later (AGPL-3.0-or-later). See LICENSE for details.
+
+Client SDKs (packages/sdk-python, packages/sdk-ts) are licensed under the MIT
+license. See the LICENSE file in each package for details.
+
+Third-party dependencies retain their original licenses. See package
+manifests for the canonical list.

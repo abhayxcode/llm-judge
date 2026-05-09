@@ -1,0 +1,36 @@
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+ Copyright (C) 2026 LLM Judge contributors
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+----------------------------------------------------------------------------
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This file is a pointer to the canonical AGPL-3.0 license text.
+
+TODO (before public release): vendor the full canonical license text from
+https://www.gnu.org/licenses/agpl-3.0.txt into this file, replacing this
+notice. Until then, the SPDX identifier above is the authoritative
+expression of the license terms.
+
+Note on dual-licensing: a commercial license is available on request.
+Contact: abhayxcode@gmail.com.
+
+Note on packages: SDKs under packages/sdk-python and packages/sdk-ts are
+distributed under the MIT license (see their respective LICENSE files).
+Everything else in this repository is AGPL-3.0-or-later unless explicitly
+marked otherwise.
