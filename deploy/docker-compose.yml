@@ -100,6 +100,84 @@ services:
       timeout: 3s
       retries: 10
 
+  ingest:
+    build:
+      context: ../services/ingest
+      dockerfile: Dockerfile
+    container_name: llm-judge-ingest
+    restart: unless-stopped
+    environment:
+      INGEST_LISTEN_ADDR: ":4318"
+      INGEST_ENV: local
+    ports:
+      - "4318:4318"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../services/api
+      dockerfile: Dockerfile
+    container_name: llm-judge-api
+    restart: unless-stopped
+    environment:
+      API_ENV: local
+      API_HOST: 0.0.0.0
+      API_PORT: "4000"
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: judge
+      PG_PASSWORD: judge
+      PG_DB: judge
+      CH_HOST: clickhouse
+      CH_HTTP_PORT: "8123"
+      CH_USER: judge
+      CH_PASSWORD: judge
+      CH_DB: judge
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  workers:
+    build:
+      context: ../services/workers
+      dockerfile: Dockerfile
+    container_name: llm-judge-workers
+    restart: unless-stopped
+    environment:
+      WORKERS_ENV: local
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    container_name: llm-judge-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
 volumes:
   postgres-data:
   clickhouse-data:
