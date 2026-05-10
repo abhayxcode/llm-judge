@@ -24,4 +24,14 @@ export { init, getConfig, resetForTests } from './config.js';
 export type { Config, InitOptions } from './config.js';
 export { trace, span } from './trace.js';
 export type { Span, Trace } from './trace.js';
+export { metric, registerMetric } from './metric.js';
+export type {
+  JudgeConfig,
+  LengthControl,
+  MetricSpec,
+  RegisteredMetric,
+  RegisterOptions,
+  Scale,
+  ScoringType,
+} from './metric.js';
 export { VERSION } from './version.js';

@@ -1,6 +1,7 @@
 export interface Config {
   apiKey: string | null;
   endpoint: string;
+  apiEndpoint: string;
   project: string | null;
   sampleRate: number;
   telemetry: boolean;
@@ -10,6 +11,7 @@ export interface Config {
 export interface InitOptions {
   apiKey?: string | null;
   endpoint?: string;
+  apiEndpoint?: string;
   project?: string | null;
   sampleRate?: number;
   telemetry?: boolean;
@@ -19,6 +21,7 @@ export interface InitOptions {
 const DEFAULT_CONFIG: Config = {
   apiKey: null,
   endpoint: 'http://localhost:4318',
+  apiEndpoint: 'http://localhost:4000',
   project: null,
   sampleRate: 1.0,
   telemetry: false,
@@ -34,6 +37,7 @@ function envFallback(): Partial<Config> {
   return {
     apiKey: nonEmpty(env.JUDGE_API_KEY) ?? null,
     endpoint: nonEmpty(env.JUDGE_ENDPOINT),
+    apiEndpoint: nonEmpty(env.JUDGE_API_ENDPOINT),
     project: nonEmpty(env.JUDGE_PROJECT) ?? null,
   };
 }
@@ -47,6 +51,7 @@ export function init(opts: InitOptions = {}): Config {
   current = {
     apiKey: opts.apiKey ?? env.apiKey ?? current.apiKey,
     endpoint: opts.endpoint ?? env.endpoint ?? current.endpoint,
+    apiEndpoint: opts.apiEndpoint ?? env.apiEndpoint ?? current.apiEndpoint,
     project: opts.project ?? env.project ?? current.project,
     sampleRate: opts.sampleRate ?? current.sampleRate,
     telemetry: opts.telemetry ?? current.telemetry,
