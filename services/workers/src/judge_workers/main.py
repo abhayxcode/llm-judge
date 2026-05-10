@@ -1,46 +1,62 @@
-"""Arq worker entrypoint."""
+"""Worker entrypoint.
+
+M1: runs the Redis Streams consumer that drains ingest into ClickHouse.
+M2+: will additionally run an Arq worker for batch eval jobs (kappa
+recompute, active learning sample, scheduled bias-report regen).
+"""
 
 from __future__ import annotations
 
+import asyncio
+import signal
 from typing import Any
 
 import structlog
-from arq.connections import RedisSettings
 
+from judge_workers.ch_writer import ClickHouseWriter
 from judge_workers.config import get_settings
-from judge_workers.jobs.ping import ping
+from judge_workers.stream_consumer import StreamConsumer
 
 log = structlog.get_logger()
 
 
-async def startup(_ctx: dict[str, Any]) -> None:
-    log.info("workers.startup")
+async def _amain() -> None:
+    settings = get_settings()
+    writer = ClickHouseWriter(settings)
+    consumer = StreamConsumer(settings, writer)
 
+    loop = asyncio.get_running_loop()
 
-async def shutdown(_ctx: dict[str, Any]) -> None:
+    def _shutdown(sig: signal.Signals) -> None:
+        log.info("workers.signal", signal=sig.name)
+        consumer.stop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _shutdown, sig)
+        except NotImplementedError:
+            # Windows or non-main thread; let KeyboardInterrupt unwind.
+            pass
+
+    log.info("workers.startup", env=settings.env)
+    await consumer.start()
     log.info("workers.shutdown")
 
 
-def _redis_settings() -> RedisSettings:
-    return RedisSettings.from_dsn(get_settings().redis_url)
+def run() -> None:
+    asyncio.run(_amain())
 
 
-class WorkerSettings:
-    """Arq worker configuration. Loaded by `arq judge_workers.main.WorkerSettings`."""
+# Stand-by Arq config for future eval jobs (kept for M2). Not executed
+# by `judge-workers` today; consumed by `arq judge_workers.main:ArqWorker`
+# when that surface lands.
+class ArqWorker:
+    """Arq worker placeholder for batched eval jobs (M2)."""
 
-    functions: list[Any] = [ping]
-    on_startup = startup
-    on_shutdown = shutdown
-    redis_settings = _redis_settings()
-    queue_name = get_settings().queue_name
+    functions: list[Any] = []
+    queue_name = "judge-default"
     max_jobs = 10
     job_timeout = 60
-
-
-def run() -> None:
-    from arq import run_worker
-
-    run_worker(WorkerSettings)
 
 
 if __name__ == "__main__":

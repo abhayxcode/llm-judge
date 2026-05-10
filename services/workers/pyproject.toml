@@ -8,6 +8,7 @@ readme = "README.md"
 dependencies = [
     "arq>=0.26",
     "redis>=5.2",
+    "clickhouse-connect>=0.8",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "structlog>=24.4",
