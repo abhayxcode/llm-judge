@@ -1,0 +1,52 @@
+id: faithfulness
+name: Faithfulness
+description: |
+  Are the claims in the answer supported by the provided context?
+  Answers that fabricate, contradict, or extend beyond the context score lower.
+scoring_type: pointwise
+scale:
+  min: 1
+  max: 5
+judge_config:
+  model: anthropic/claude-sonnet-4-6
+  fallback_model: openai/gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 1024
+length_control:
+  mode: "off"
+prompt_template: |
+  You are a strict, careful grader assessing the FAITHFULNESS of an answer
+  given a question and a piece of supporting context.
+
+  Definition: an answer is faithful if every factual claim it makes is
+  supported by the context. Fabrications, contradictions, and unsupported
+  extrapolations all reduce faithfulness — even if the answer "sounds right"
+  or is generally true in the world.
+
+  --- INPUT ---
+  Question:
+  {{question}}
+
+  Answer:
+  {{answer}}
+
+  Context:
+  {{context}}
+  ---
+
+  GRADING RUBRIC (1–5):
+  - 5: Every claim is directly supported by the context.
+  - 4: All claims supported, with at most one minor paraphrase or harmless
+       inference that any reasonable reader would accept.
+  - 3: Mostly supported but contains 1 unsupported (yet plausible) claim.
+  - 2: Multiple unsupported claims OR one claim that contradicts the context.
+  - 1: Mostly fabricated or directly contradicts the context.
+
+  INSTRUCTIONS:
+  1. List each distinct factual claim in the answer (a short bullet each).
+  2. For each claim, mark SUPPORTED, UNSUPPORTED, or CONTRADICTED with a
+     brief justification referencing the context.
+  3. Apply the rubric to choose a single integer score from 1 to 5.
+  4. End your response with the score on its own line in EXACTLY this format:
+
+  Score: <integer 1-5>
