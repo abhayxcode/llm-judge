@@ -160,6 +160,23 @@ async def list_datasets(
     return out
 
 
+@router.get("/datasets/records/{record_id}", response_model=DatasetRecordOut)
+async def get_dataset_record(
+    record_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> DatasetRecordOut:
+    rec = await session.get(DatasetRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"record '{record_id}' not found")
+    return DatasetRecordOut(
+        id=rec.id,
+        row_index=rec.row_index,
+        input=rec.input,
+        expected_output=rec.expected_output,
+        context=rec.context,
+    )
+
+
 @router.get(
     "/datasets/{slug}/versions/{version}/records",
     response_model=list[DatasetRecordOut],
