@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from judge_api import __version__
 from judge_api.config import Settings, get_settings
-from judge_api.routes import health
+from judge_api.routes import health, traces
 
 log = structlog.get_logger()
 
@@ -30,7 +31,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
     app.include_router(health.router)
+    app.include_router(traces.router)
     return app
 
 
