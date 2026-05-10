@@ -31,7 +31,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.New(cfg, logger)
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bootCancel()
+	srv, err := server.New(bootCtx, cfg, logger)
+	if err != nil {
+		logger.Error("server init failed", "err", err)
+		os.Exit(1)
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

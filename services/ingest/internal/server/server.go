@@ -2,23 +2,55 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/abhayxcode/llm-judge/services/ingest/internal/config"
+	"github.com/abhayxcode/llm-judge/services/ingest/internal/queue"
 )
+
+// Publisher is the abstraction the server uses to publish traces.
+// Allows tests to inject a fake.
+type Publisher interface {
+	PublishTrace(ctx context.Context, projectID, orgID string, payload []byte) (string, error)
+	Ping(ctx context.Context) error
+}
+
+// realPublisher adapts queue.Publisher to the json.RawMessage-free interface.
+type realPublisher struct{ inner *queue.Publisher }
+
+func (r *realPublisher) PublishTrace(ctx context.Context, projectID, orgID string, payload []byte) (string, error) {
+	return r.inner.PublishTrace(ctx, projectID, orgID, payload)
+}
+
+func (r *realPublisher) Ping(ctx context.Context) error { return r.inner.Ping(ctx) }
 
 // Server holds shared dependencies for HTTP handlers.
 type Server struct {
 	cfg    *config.Config
 	logger *slog.Logger
+	pub    Publisher
 }
 
-// New constructs a Server.
-func New(cfg *config.Config, logger *slog.Logger) *Server {
-	return &Server{cfg: cfg, logger: logger}
+// New constructs a Server with a real Redis publisher.
+func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Server, error) {
+	pub, err := queue.NewPublisher(ctx, cfg.RedisURL, cfg.StreamName, cfg.StreamMaxLen)
+	if err != nil {
+		return nil, err
+	}
+	return &Server{cfg: cfg, logger: logger, pub: &realPublisher{inner: pub}}, nil
+}
+
+// NewWithPublisher constructs a Server with an injected publisher.
+// Used by tests + ops tooling.
+func NewWithPublisher(cfg *config.Config, logger *slog.Logger, pub Publisher) *Server {
+	return &Server{cfg: cfg, logger: logger, pub: pub}
 }
 
 // Routes returns the http.Handler for all ingest routes.
@@ -41,19 +73,62 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
-	// Stub: real readiness will check Redis Stream + ClickHouse connectivity.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Second)
+	defer cancel()
+	if err := s.pub.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ready": false, "redis": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ready": true})
 }
 
-func (s *Server) handleTraces(w http.ResponseWriter, _ *http.Request) {
-	// Stub. Real implementation: validate, redact-respect, write to Redis stream,
-	// async writer batches into ClickHouse.
-	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "stub": true})
+// handleTraces accepts the SDK's native trace payload and pushes it onto the
+// Redis stream. Authentication is intentionally permissive in M1: any
+// `Authorization: Bearer ...` header is accepted; project ID is taken from
+// the `x-judge-project` header. Real PG-backed key validation lands in M2.
+func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "payload too large"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "read body: " + err.Error()})
+		return
+	}
+	if !json.Valid(body) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+
+	projectID := strings.TrimSpace(r.Header.Get("x-judge-project"))
+	if projectID == "" {
+		projectID = s.cfg.DefaultProjectID
+	}
+	orgID := strings.TrimSpace(r.Header.Get("x-judge-org"))
+	if orgID == "" {
+		orgID = s.cfg.DefaultOrgID
+	}
+
+	id, err := s.pub.PublishTrace(r.Context(), projectID, orgID, body)
+	if err != nil {
+		s.logger.Error("publish failed", "err", err, "project_id", projectID)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "queue unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":   true,
+		"stream_id":  id,
+		"project_id": projectID,
+	})
 }
 
 func (s *Server) handleOTLPTraces(w http.ResponseWriter, _ *http.Request) {
-	// Stub for OTLP/HTTP. gRPC endpoint added later.
+	// Stub for OTLP/HTTP. Translator + gRPC endpoint added in M3 alongside
+	// production observability surface.
 	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "stub": true})
 }
 
