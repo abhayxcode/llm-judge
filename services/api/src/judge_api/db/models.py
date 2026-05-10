@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -140,6 +140,9 @@ class Dataset(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="private")
+    license: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     versions: Mapped[list[DatasetVersion]] = relationship(
         back_populates="dataset", cascade="all, delete-orphan"
     )
@@ -210,6 +213,113 @@ class Run(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = _ulid_pk()
+    email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class HumanLabel(Base):
+    """One labeller's score for one (metric_version, record) pair.
+
+    Uniqueness is on (metric_version_id, record_id, user_id); inter-rater
+    agreement is computed across all labellers for the same row.
+    """
+
+    __tablename__ = "human_labels"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    metric_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metrics.id", ondelete="CASCADE"), nullable=False
+    )
+    metric_version_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metric_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    record_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("dataset_records.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AgreementMetric(Base):
+    """Latest agreement snapshot per (project, metric_version).
+
+    Recomputed on every label write (incrementally cheap for n < 10k);
+    full nightly recompute is a separate job (deferred to M5).
+    """
+
+    __tablename__ = "agreement_metrics"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    metric_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metrics.id", ondelete="CASCADE"), nullable=False
+    )
+    metric_version_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metric_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    n_labels: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cohen_kappa: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fleiss_kappa: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pearson_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spearman_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class LabelQueueItem(Base):
+    """One queued candidate record for human labelling.
+
+    Built by the active-learning sampler; surfaced via /v1/queue. Multiple
+    strategies write rows here; uniqueness on (project, metric, record)
+    keeps the queue de-duplicated across strategy runs.
+    """
+
+    __tablename__ = "label_queue"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    metric_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metrics.id", ondelete="CASCADE"), nullable=False
+    )
+    record_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("dataset_records.id", ondelete="CASCADE"), nullable=False
+    )
+    strategy: Mapped[str] = mapped_column(String(64), nullable=False)
+    priority: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
