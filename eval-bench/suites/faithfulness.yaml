@@ -1,0 +1,7 @@
+project: demo
+metric: ../metrics/faithfulness.v1.yaml
+dataset:
+  slug: faithfulness_seed
+  name: Faithfulness seed v1
+  records: ../datasets/faithfulness_seed.v1.jsonl
+run_name: faithfulness baseline
