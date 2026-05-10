@@ -1,5 +1,5 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { sendTrace } from './client.js';
+import { type ContextStore, createContextStore } from './context.js';
 import { newUlid } from './ulid.js';
 
 export interface SpanPayload {
@@ -28,7 +28,7 @@ interface Context {
   spanStack: SpanImpl[];
 }
 
-const als = new AsyncLocalStorage<Context>();
+const als: ContextStore<Context> = createContextStore<Context>();
 const nowMs = (): number => Date.now();
 
 class SpanImpl {
@@ -104,7 +104,7 @@ export type Trace = TraceImpl;
 
 /** Open a child span under the current trace. */
 export function span(name: string, attributes: Record<string, unknown> = {}): Span {
-  const ctx = als.getStore();
+  const ctx = als.get();
   const parentId = ctx?.spanStack[ctx.spanStack.length - 1]?.span_id ?? null;
   const s = new SpanImpl(name, parentId, attributes);
   if (ctx) {
