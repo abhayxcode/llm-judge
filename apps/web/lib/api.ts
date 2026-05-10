@@ -72,4 +72,70 @@ export async function getTrace(traceId: string, project = 'demo'): Promise<Trace
   }
 }
 
+export interface RunSummary {
+  id: string;
+  project_id: string;
+  name: string;
+  status: string;
+  metric_version_id: string;
+  dataset_version_id: string;
+  record_count: number;
+  completed_count: number;
+  error_count: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface ScoreRow {
+  trace_id: string;
+  span_id: string | null;
+  score: number;
+  score_raw: string;
+  reasoning: string | null;
+  label: string | null;
+  judge_model: string;
+  judge_provider: string;
+  cost_usd: number;
+  latency_ms: number;
+  computed_at: string;
+}
+
+export async function listRuns(project = 'demo', limit = 50): Promise<RunSummary[]> {
+  const url = new URL('/v1/runs', API_URL);
+  url.searchParams.set('project', project);
+  url.searchParams.set('limit', String(limit));
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`api ${resp.status}`);
+    return (await resp.json()) as RunSummary[];
+  } catch {
+    return [];
+  }
+}
+
+export async function getRun(runId: string): Promise<RunSummary | null> {
+  const url = new URL(`/v1/runs/${encodeURIComponent(runId)}`, API_URL);
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (resp.status === 404) return null;
+    if (!resp.ok) throw new Error(`api ${resp.status}`);
+    return (await resp.json()) as RunSummary;
+  } catch {
+    return null;
+  }
+}
+
+export async function getRunScores(runId: string): Promise<ScoreRow[]> {
+  const url = new URL(`/v1/runs/${encodeURIComponent(runId)}/scores`, API_URL);
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`api ${resp.status}`);
+    return (await resp.json()) as ScoreRow[];
+  } catch {
+    return [];
+  }
+}
+
 export const apiUrl = API_URL;

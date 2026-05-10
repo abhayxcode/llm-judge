@@ -1,27 +1,23 @@
-import { apiUrl, listTraces } from '@/lib/api';
+import { listRuns } from '@/lib/api';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-function fmtMs(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
-
-function fmtTime(iso: string): string {
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toISOString().replace('T', ' ').replace('Z', '');
 }
 
-export default async function HomePage({
+export default async function RunsPage({
   searchParams,
 }: {
   searchParams: Promise<{ project?: string }>;
 }) {
   const params = await searchParams;
   const project = params.project ?? 'demo';
-  const traces = await listTraces(project, 50);
+  const runs = await listRuns(project, 100);
 
   return (
     <main
@@ -35,53 +31,52 @@ export default async function HomePage({
       <header
         style={{ display: 'flex', alignItems: 'baseline', gap: '1rem', marginBottom: '2rem' }}
       >
-        <h1 style={{ fontSize: '1.75rem', margin: 0 }}>LLM Judge</h1>
+        <h1 style={{ fontSize: '1.75rem', margin: 0 }}>Runs</h1>
         <span style={{ color: '#888' }}>
           project: <code>{project}</code>
         </span>
         <Link
-          href={{ pathname: '/runs', query: { project } }}
-          style={{ color: '#0070f3', fontSize: '0.95rem' }}
+          href={{ pathname: '/', query: { project } }}
+          style={{ marginLeft: 'auto', color: '#0070f3' }}
         >
-          runs →
+          ← traces
         </Link>
-        <span style={{ marginLeft: 'auto', color: '#888', fontSize: '0.875rem' }}>
-          api: <code>{apiUrl}</code>
-        </span>
       </header>
 
-      {traces.length === 0 ? (
+      {runs.length === 0 ? (
         <Empty />
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-              <Th>Trace</Th>
+              <Th>Run</Th>
               <Th>Name</Th>
-              <Th>Started</Th>
-              <Th>Duration</Th>
-              <Th>Spans</Th>
               <Th>Status</Th>
+              <Th>Progress</Th>
+              <Th>Errors</Th>
+              <Th>Started</Th>
             </tr>
           </thead>
           <tbody>
-            {traces.map((t) => (
-              <tr key={t.trace_id} style={{ borderBottom: '1px solid #eee' }}>
+            {runs.map((r) => (
+              <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
                 <Td>
                   <Link
-                    href={{ pathname: `/traces/${t.trace_id}`, query: { project } }}
+                    href={{ pathname: `/runs/${r.id}`, query: { project } }}
                     style={{ fontFamily: 'ui-monospace, monospace', color: '#0070f3' }}
                   >
-                    {t.trace_id.slice(0, 12)}…
+                    {r.id.slice(0, 12)}…
                   </Link>
                 </Td>
-                <Td>{t.name}</Td>
-                <Td style={{ color: '#666' }}>{fmtTime(t.last_seen)}</Td>
-                <Td>{fmtMs(t.duration_ms)}</Td>
-                <Td>{t.span_count}</Td>
+                <Td>{r.name}</Td>
                 <Td>
-                  <StatusPill status={t.status} />
+                  <StatusPill status={r.status} />
                 </Td>
+                <Td>
+                  {r.completed_count}/{r.record_count}
+                </Td>
+                <Td style={{ color: r.error_count > 0 ? '#a13a2a' : '#666' }}>{r.error_count}</Td>
+                <Td style={{ color: '#666' }}>{fmtTime(r.started_at)}</Td>
               </tr>
             ))}
           </tbody>
@@ -100,7 +95,13 @@ function Td({ children, style }: { children: React.ReactNode; style?: React.CSSP
 }
 
 function StatusPill({ status }: { status: string }) {
-  const ok = status === 'ok';
+  const colors: Record<string, [string, string]> = {
+    queued: ['#f0f0f0', '#555'],
+    running: ['#fff4d6', '#7a5b00'],
+    done: ['#e6f7ec', '#1f7a3a'],
+    failed: ['#fdecea', '#a13a2a'],
+  };
+  const [bg, fg] = colors[status] ?? ['#eee', '#444'];
   return (
     <span
       style={{
@@ -108,8 +109,8 @@ function StatusPill({ status }: { status: string }) {
         padding: '0.15rem 0.5rem',
         borderRadius: 999,
         fontSize: '0.8rem',
-        background: ok ? '#e6f7ec' : '#fdecea',
-        color: ok ? '#1f7a3a' : '#a13a2a',
+        background: bg,
+        color: fg,
       }}
     >
       {status}
@@ -128,30 +129,12 @@ function Empty() {
       }}
     >
       <p style={{ marginTop: 0 }}>
-        <strong>No traces yet.</strong>
+        <strong>No runs yet.</strong>
       </p>
       <p>
-        Send one with the SDK: <code>judge.init(...)</code> + <code>@judge.trace</code>, point at{' '}
-        <code>http://localhost:4318</code>.
+        Kick one off with the CLI:{' '}
+        <code>judge run --suite eval-bench/suites/faithfulness.yaml</code>
       </p>
-      <p style={{ marginBottom: 0, fontSize: '0.9rem' }}>
-        Or POST a trace directly to <code>{'<api>/v1/traces'}</code>:
-      </p>
-      <pre
-        style={{
-          background: '#f6f6f6',
-          padding: '0.75rem',
-          borderRadius: 6,
-          overflowX: 'auto',
-          marginTop: '0.75rem',
-          fontSize: '0.85rem',
-        }}
-      >
-        {`curl -X POST http://localhost:4318/v1/traces \\
-  -H 'content-type: application/json' \\
-  -H 'x-judge-project: demo' \\
-  -d '{"trace_id":"...","name":"hello","spans":[...]}'`}
-      </pre>
     </div>
   );
 }
