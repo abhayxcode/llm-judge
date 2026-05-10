@@ -107,6 +107,32 @@ render on `/runs/{id}`.
 To run against your own dataset, point the suite YAML at a JSONL where
 each line has `input` + optional `expected_output` + optional `context`.
 
+### 5. M4 — label, agree, calibrate
+
+After at least one judge run has scored some records, label them and
+watch agreement update live:
+
+```bash
+# Bulk-import a CSV or JSONL into a new dataset version.
+uv run judge dataset import ./my_qa.csv \
+    --project demo --slug my_qa
+
+# Open the labelling UI.
+open http://localhost:3000/labels?project=demo&metric=faithfulness
+```
+
+The UI seeds a queue from the active-learning sampler (`low_confidence`
++ `drift_outlier`); each label POST upserts a `human_labels` row,
+recomputes Cohen κ / Fleiss κ / Pearson r / Spearman ρ, and surfaces
+the snapshot at `GET /v1/agreement?project=demo&metric=faithfulness`.
+
+Splits for offline experiments:
+
+```bash
+uv run judge dataset split ./my_qa.jsonl \
+    --out-dir splits/ --train 0.7 --dev 0.15 --test 0.15
+```
+
 ## License
 
 - Server (apps, services, deploy, eval-bench): **AGPL-3.0-or-later**
