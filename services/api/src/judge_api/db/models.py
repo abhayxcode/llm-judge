@@ -4,8 +4,7 @@ ClickHouse stores high-volume span/score data; Postgres stores everything
 that needs ACID + relations: orgs, projects, RBAC, datasets, metric defs,
 prompts, runs, budgets, audit log.
 
-M1 only declares orgs/projects/api_keys. Datasets, metric defs, prompts,
-eval runs land in M2 alongside the eval engine.
+M2 adds metric IR + dataset versioning + runs alongside the eval engine.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -84,6 +83,136 @@ class ApiKey(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="api_keys")
+
+
+class Metric(Base):
+    __tablename__ = "metrics"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    scoring_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    versions: Mapped[list[MetricVersion]] = relationship(
+        back_populates="metric", cascade="all, delete-orphan"
+    )
+
+
+class MetricVersion(Base):
+    """Immutable, content-addressed snapshot of a metric definition.
+
+    `hash` is sha256 of the canonical JSON of the IR; same content → same hash.
+    `version` is a monotonic 1-based int per metric, assigned at insert time.
+    """
+
+    __tablename__ = "metric_versions"
+
+    id: Mapped[str] = _ulid_pk()
+    metric_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metrics.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ir: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    metric: Mapped[Metric] = relationship(back_populates="versions")
+
+
+class Dataset(Base):
+    __tablename__ = "datasets"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    versions: Mapped[list[DatasetVersion]] = relationship(
+        back_populates="dataset", cascade="all, delete-orphan"
+    )
+
+
+class DatasetVersion(Base):
+    __tablename__ = "dataset_versions"
+
+    id: Mapped[str] = _ulid_pk()
+    dataset_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    dataset: Mapped[Dataset] = relationship(back_populates="versions")
+    records: Mapped[list[DatasetRecord]] = relationship(
+        back_populates="dataset_version", cascade="all, delete-orphan"
+    )
+
+
+class DatasetRecord(Base):
+    __tablename__ = "dataset_records"
+
+    id: Mapped[str] = _ulid_pk()
+    dataset_version_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("dataset_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    row_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    input: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    dataset_version: Mapped[DatasetVersion] = relationship(back_populates="records")
+
+
+class Run(Base):
+    """One `judge run` invocation. Status: queued → running → done|failed.
+
+    Score rows live in CH; this row holds run-level rollups + status so the
+    UI can render progress without scanning CH.
+    """
+
+    __tablename__ = "runs"
+
+    id: Mapped[str] = _ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    metric_version_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("metric_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    dataset_version_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("dataset_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    judge_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class AuditLog(Base):
