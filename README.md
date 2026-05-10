@@ -38,7 +38,74 @@ eval-bench/             # Internal: golden datasets + Bias Report runners
 
 ## Quickstart
 
-Coming soon. Right now the repo is a scaffold; nothing runs end-to-end yet.
+The stack runs locally via `docker-compose`. Below covers M1 (trace
+hello-world) and M2 (faithfulness eval run) end-to-end.
+
+### 0. Prerequisites
+
+- Docker + docker-compose
+- Python 3.12, [`uv`](https://docs.astral.sh/uv/)
+- Node 20, [`pnpm`](https://pnpm.io/)
+- One of: `ANTHROPIC_API_KEY` (preferred — Sonnet 4.6 is the default
+  judge), or `OPENAI_API_KEY` (fallback path uses GPT-4o-mini). BYOM
+  endpoints work via per-metric `judge_config.api_base`.
+
+### 1. Bring up infrastructure
+
+```bash
+make bootstrap                    # uv + pnpm installs
+docker compose -f deploy/docker-compose.yml up -d \
+    postgres clickhouse minio redis
+uv run judge-cli migrate-pg       # alembic up to 0002
+uv run judge-cli migrate-ch       # ClickHouse DDL (spans, scores, ...)
+uv run judge-cli bootstrap        # creates default org + 'demo' project,
+                                  # prints API key once
+```
+
+Export the printed key as `JUDGE_API_KEY` if you want SDK auth (not yet
+enforced in M1/M2 ingest path; required from M5 onward).
+
+### 2. Start the services
+
+In separate terminals (or `docker compose up ingest api workers web`):
+
+```bash
+# Go ingest on :4318
+make dev-ingest
+
+# Python API on :4000
+uv run judge-api
+
+# Workers (trace consumer + eval consumer)
+uv run judge-workers
+
+# Web on :3000
+pnpm --filter @llm-judge/web dev
+```
+
+### 3. M1 — trace hello-world
+
+```bash
+uv run python packages/sdk-python/examples/hello.py
+```
+
+Trace lands in <5 s at `http://localhost:3000`. Click through to the
+trace detail.
+
+### 4. M2 — score a dataset (`faithfulness` v1)
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+uv run judge run --suite eval-bench/suites/faithfulness.yaml
+```
+
+The CLI registers the metric IR, uploads the 20-record seed dataset,
+kicks off a run, and tails progress until done. Scores appear at
+`http://localhost:3000/runs`; per-record reasoning, cost, and latency
+render on `/runs/{id}`.
+
+To run against your own dataset, point the suite YAML at a JSONL where
+each line has `input` + optional `expected_output` + optional `context`.
 
 ## License
 
