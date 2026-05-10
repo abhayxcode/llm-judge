@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from judge_api import __version__
 from judge_api.config import Settings, get_settings
-from judge_api.routes import health, traces
+from judge_api.routes import datasets, health, metrics, runs, traces
 
 log = structlog.get_logger()
 
@@ -35,11 +35,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["*"],
     )
     app.include_router(health.router)
     app.include_router(traces.router)
+    app.include_router(metrics.router)
+    app.include_router(datasets.router)
+    app.include_router(runs.router)
     return app
 
 
