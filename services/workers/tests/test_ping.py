@@ -1,5 +1,4 @@
 import pytest
-
 from judge_workers.jobs.ping import ping
 
 
