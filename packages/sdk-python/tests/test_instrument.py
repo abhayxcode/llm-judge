@@ -7,6 +7,7 @@ suite hermetic and verifies the span/attribute shape directly.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -137,10 +138,8 @@ def test_wrap_propagates_exceptions_and_marks_span_error() -> None:
         _BadChat().create()
 
     try:
-        try:
+        with contextlib.suppress(RuntimeError):
             go()
-        except RuntimeError:
-            pass
     finally:
         t.send_trace = orig_send  # type: ignore[assignment]
         unpatch()
