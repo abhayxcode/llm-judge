@@ -234,4 +234,136 @@ export async function getRunScores(runId: string): Promise<ScoreRow[]> {
   }
 }
 
+export interface MetricSummary {
+  id: string;
+  slug: string;
+  name: string;
+  scoring_type: string;
+  latest_version: number | null;
+  latest_hash: string | null;
+}
+
+export interface DatasetRecord {
+  id: string;
+  row_index: number;
+  input: Record<string, unknown>;
+  expected_output: string | null;
+  context: Record<string, unknown> | null;
+}
+
+export interface AgreementSnapshot {
+  project_id: string;
+  metric_id: string;
+  metric_slug: string;
+  metric_version_id: string;
+  metric_version: number;
+  n_labels: number;
+  cohen_kappa: number | null;
+  fleiss_kappa: number | null;
+  pearson_r: number | null;
+  spearman_r: number | null;
+  computed_at: string;
+}
+
+export interface QueueItem {
+  id: string;
+  project_id: string;
+  metric_id: string;
+  record_id: string;
+  strategy: string;
+  priority: number;
+  reason: string | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface HumanLabel {
+  id: string;
+  project_id: string;
+  metric_id: string;
+  metric_version_id: string;
+  record_id: string;
+  user_id: string;
+  user_email: string;
+  score: number;
+  label: string | null;
+  rationale: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export async function listMetrics(project = 'demo'): Promise<MetricSummary[]> {
+  const url = new URL('/v1/metrics', API_URL);
+  url.searchParams.set('project', project);
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    return (await resp.json()) as MetricSummary[];
+  } catch {
+    return [];
+  }
+}
+
+export async function getAgreement(
+  project: string,
+  metric: string,
+): Promise<AgreementSnapshot | null> {
+  const url = new URL('/v1/agreement', API_URL);
+  url.searchParams.set('project', project);
+  url.searchParams.set('metric', metric);
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const body = await resp.json();
+    return body as AgreementSnapshot | null;
+  } catch {
+    return null;
+  }
+}
+
+export async function listQueue(project: string, metric: string, limit = 50): Promise<QueueItem[]> {
+  const url = new URL('/v1/queue', API_URL);
+  url.searchParams.set('project', project);
+  url.searchParams.set('metric', metric);
+  url.searchParams.set('limit', String(limit));
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    return (await resp.json()) as QueueItem[];
+  } catch {
+    return [];
+  }
+}
+
+export async function getDatasetRecord(recordId: string): Promise<DatasetRecord | null> {
+  const url = new URL(`/v1/datasets/records/${encodeURIComponent(recordId)}`, API_URL);
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return null;
+    return (await resp.json()) as DatasetRecord;
+  } catch {
+    return null;
+  }
+}
+
+export async function listLabels(
+  project: string,
+  metric: string,
+  limit = 200,
+): Promise<HumanLabel[]> {
+  const url = new URL('/v1/labels', API_URL);
+  url.searchParams.set('project', project);
+  url.searchParams.set('metric', metric);
+  url.searchParams.set('limit', String(limit));
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    return (await resp.json()) as HumanLabel[];
+  } catch {
+    return [];
+  }
+}
+
 export const apiUrl = API_URL;

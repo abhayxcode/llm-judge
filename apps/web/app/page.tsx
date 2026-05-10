@@ -71,6 +71,9 @@ export default async function HomePage({
         <Link href={{ pathname: '/runs', query: { project } }} style={{ color: '#0070f3' }}>
           runs →
         </Link>
+        <Link href={{ pathname: '/labels', query: { project } }} style={{ color: '#0070f3' }}>
+          labels →
+        </Link>
         <span style={{ marginLeft: 'auto', color: '#888', fontSize: '0.875rem' }}>
           api: <code>{apiUrl}</code>
         </span>
