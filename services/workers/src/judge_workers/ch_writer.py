@@ -82,8 +82,41 @@ class ClickHouseWriter:
         self._client.insert("spans", rows, column_names=list(_COLUMNS))
         return len(rows)
 
+    def write_score(self, row: dict[str, Any]) -> None:
+        """Insert one score row.
+
+        `row` keys must match the `scores` table columns; missing optional
+        columns get defaulted to None / 0 by the table definition.
+        """
+        cols = list(_SCORE_COLUMNS)
+        values = [[row.get(c) for c in cols]]
+        self._client.insert("scores", values, column_names=cols)
+
     def close(self) -> None:
         self._client.close()
+
+
+_SCORE_COLUMNS = (
+    "org_id",
+    "project_id",
+    "trace_id",
+    "span_id",
+    "metric_id",
+    "metric_version",
+    "score",
+    "score_raw",
+    "reasoning",
+    "label",
+    "judge_model",
+    "judge_provider",
+    "cost_usd",
+    "latency_ms",
+    "self_enhancement_warning",
+    "position_swapped",
+    "consistency",
+    "computed_at",
+    "attributes",
+)
 
 
 def _span_to_row(

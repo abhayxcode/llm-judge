@@ -11,7 +11,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-
 from judge_workers.ch_writer import ClickHouseWriter
 from judge_workers.config import Settings
 

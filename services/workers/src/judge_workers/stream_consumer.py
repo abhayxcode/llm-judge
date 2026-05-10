@@ -108,5 +108,5 @@ class StreamConsumer:
                 trace_id=str(payload.get("trace_id", ""))[:12] + "...",
                 spans=inserted,
             )
-        except Exception as err:  # noqa: BLE001 — log + leave pending for retry
+        except Exception as err:
             log.error("stream.insert_failed", id=message_id, err=str(err))
