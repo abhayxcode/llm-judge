@@ -77,11 +77,39 @@ def list_traces(
     request: Request,
     project: str = Query("demo", description="Project ID / slug to filter on"),
     limit: int = Query(50, ge=1, le=500),
+    since_minutes: int | None = Query(None, ge=1, le=60 * 24 * 30),
+    name_contains: str | None = Query(None, max_length=128),
+    model: str | None = Query(None, max_length=128),
+    status: str | None = Query(None, pattern="^(ok|error)$"),
 ) -> list[TraceSummary]:
-    """List recent traces for a project, newest first."""
+    """List recent traces for a project, newest first.
+
+    Filters (all optional, AND-combined):
+    - `since_minutes` — last N minutes of activity.
+    - `name_contains` — substring match on the trace name.
+    - `model` — match against any span's gen_ai_model on the trace.
+    - `status` — `ok` or `error`.
+    """
     client = _client(request)
-    rows = client.query(
-        """
+    where = ["project_id = {project:String}"]
+    params: dict[str, Any] = {"project": project, "limit": limit}
+    if since_minutes is not None:
+        where.append("last_seen >= now() - INTERVAL {since:UInt32} MINUTE")
+        params["since"] = since_minutes
+    if name_contains:
+        where.append("position(trace_name, {name_q:String}) > 0")
+        params["name_q"] = name_contains
+    if status:
+        where.append("status = {status:String}")
+        params["status"] = status
+    if model:
+        where.append(
+            "trace_id IN (SELECT trace_id FROM spans WHERE project_id = {project:String} "
+            "AND gen_ai_model = {model:String})"
+        )
+        params["model"] = model
+
+    sql = f"""
         SELECT
             trace_id,
             org_id,
@@ -98,12 +126,11 @@ def list_traces(
             output_tokens,
             total_tokens
         FROM v_traces
-        WHERE project_id = {project:String}
+        WHERE {" AND ".join(where)}
         ORDER BY last_seen DESC
-        LIMIT {limit:UInt32}
-        """,
-        parameters={"project": project, "limit": limit},
-    ).named_results()
+        LIMIT {{limit:UInt32}}
+    """
+    rows = client.query(sql, parameters=params).named_results()
     return [TraceSummary(**_row(r)) for r in rows]
 
 
