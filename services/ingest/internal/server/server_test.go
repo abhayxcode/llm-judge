@@ -15,9 +15,9 @@ import (
 )
 
 type fakePublisher struct {
-	mu        sync.Mutex
-	published []publishedRecord
-	pingErr   error
+	mu         sync.Mutex
+	published  []publishedRecord
+	pingErr    error
 	publishErr error
 }
 
@@ -154,5 +154,58 @@ func TestUnknownRouteIs404(t *testing.T) {
 	s.Routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", rr.Code)
+	}
+}
+
+func TestOTLPTracesPublishesPerTrace(t *testing.T) {
+	t.Parallel()
+	pub := &fakePublisher{}
+	s := newTestServer(t, pub)
+
+	otlpJSON := `{
+		"resourceSpans": [{
+			"scopeSpans": [{
+				"spans": [
+					{"traceId": "T1", "spanId": "a", "name": "root1", "startTimeUnixNano": "1000000", "endTimeUnixNano": "2000000", "status": {"code": 1}},
+					{"traceId": "T2", "spanId": "b", "name": "root2", "startTimeUnixNano": "1000000", "endTimeUnixNano": "2000000", "status": {"code": 1}}
+				]
+			}]
+		}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/traces", strings.NewReader(otlpJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-judge-project", "demo")
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("want 202, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	if len(pub.published) != 2 {
+		t.Fatalf("expected 2 publishes, got %d", len(pub.published))
+	}
+}
+
+func TestOTLPTracesRejectsProtobuf(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakePublisher{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/traces", strings.NewReader("\x00\x01"))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("want 415, got %d", rr.Code)
+	}
+}
+
+func TestOTLPTracesRejectsBadJSON(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakePublisher{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/traces", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rr.Code)
 	}
 }

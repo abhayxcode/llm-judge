@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/abhayxcode/llm-judge/services/ingest/internal/config"
+	"github.com/abhayxcode/llm-judge/services/ingest/internal/otlp"
 	"github.com/abhayxcode/llm-judge/services/ingest/internal/queue"
 )
 
@@ -126,10 +127,68 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleOTLPTraces(w http.ResponseWriter, _ *http.Request) {
-	// Stub for OTLP/HTTP. Translator + gRPC endpoint added in M3 alongside
-	// production observability surface.
-	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "stub": true})
+// handleOTLPTraces accepts OTLP/HTTP JSON requests, translates them
+// into our internal trace payload, and pushes one Redis-stream message
+// per traceId observed. Protobuf encoding is not yet supported — most
+// OTel exporters can fall back to JSON via OTEL_EXPORTER_OTLP_PROTOCOL=
+// http/json. gRPC ingest is M3.b (separate listener).
+func (s *Server) handleOTLPTraces(w http.ResponseWriter, r *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "json") {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{
+			"error": "only application/json is supported in M3; bump OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+		})
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "payload too large"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "read body: " + err.Error()})
+		return
+	}
+
+	traces, err := otlp.Translate(body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "decode otlp: " + err.Error()})
+		return
+	}
+
+	projectID := strings.TrimSpace(r.Header.Get("x-judge-project"))
+	if projectID == "" {
+		projectID = s.cfg.DefaultProjectID
+	}
+	orgID := strings.TrimSpace(r.Header.Get("x-judge-org"))
+	if orgID == "" {
+		orgID = s.cfg.DefaultOrgID
+	}
+
+	streamIDs := make([]string, 0, len(traces))
+	for _, t := range traces {
+		payload, err := json.Marshal(t)
+		if err != nil {
+			s.logger.Warn("otlp marshal", "err", err, "trace_id", t.TraceID)
+			continue
+		}
+		id, err := s.pub.PublishTrace(r.Context(), projectID, orgID, payload)
+		if err != nil {
+			s.logger.Error("otlp publish", "err", err, "project_id", projectID)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "queue unavailable"})
+			return
+		}
+		streamIDs = append(streamIDs, id)
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":   true,
+		"traces":     len(streamIDs),
+		"stream_ids": streamIDs,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
