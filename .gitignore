@@ -1,6 +1,7 @@
 # Project-local docs are intentionally outside version control.
 .docs/
 .docs
+CLAUDE.md
 
 # Node / pnpm
 node_modules/
