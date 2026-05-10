@@ -17,15 +17,20 @@ OTel exporter, async APIs all land in subsequent commits.
 """
 
 from judge._config import Config, init
+from judge._metric import MetricSpec, metric, metric_ir, register_metric
 from judge._trace import Span, Trace, span, trace
 from judge._version import __version__
 
 __all__ = [
     "Config",
+    "MetricSpec",
     "Span",
     "Trace",
     "__version__",
     "init",
+    "metric",
+    "metric_ir",
+    "register_metric",
     "span",
     "trace",
 ]

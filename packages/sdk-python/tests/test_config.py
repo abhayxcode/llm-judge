@@ -1,5 +1,4 @@
 import pytest
-
 from judge import init
 from judge._config import get_config, reset_for_tests
 
