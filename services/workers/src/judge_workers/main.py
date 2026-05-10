@@ -15,6 +15,7 @@ import structlog
 
 from judge_workers.ch_writer import ClickHouseWriter
 from judge_workers.config import get_settings
+from judge_workers.eval_consumer import EvalConsumer
 from judge_workers.stream_consumer import StreamConsumer
 
 log = structlog.get_logger()
@@ -22,14 +23,17 @@ log = structlog.get_logger()
 
 async def _amain() -> None:
     settings = get_settings()
-    writer = ClickHouseWriter(settings)
-    consumer = StreamConsumer(settings, writer)
+    trace_writer = ClickHouseWriter(settings)
+    eval_writer = ClickHouseWriter(settings)
+    trace_consumer = StreamConsumer(settings, trace_writer)
+    eval_consumer = EvalConsumer(settings, eval_writer)
 
     loop = asyncio.get_running_loop()
 
     def _shutdown(sig: signal.Signals) -> None:
         log.info("workers.signal", signal=sig.name)
-        consumer.stop()
+        trace_consumer.stop()
+        eval_consumer.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -39,7 +43,7 @@ async def _amain() -> None:
             pass
 
     log.info("workers.startup", env=settings.env)
-    await consumer.start()
+    await asyncio.gather(trace_consumer.start(), eval_consumer.start())
     log.info("workers.shutdown")
 
 
