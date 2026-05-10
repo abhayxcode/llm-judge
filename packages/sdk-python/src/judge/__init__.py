@@ -16,6 +16,7 @@ This is the M1 skeleton. Batched sends, redaction, auto-instrument,
 OTel exporter, async APIs all land in subsequent commits.
 """
 
+from judge import instrument
 from judge._config import Config, init
 from judge._metric import MetricSpec, metric, metric_ir, register_metric
 from judge._trace import Span, Trace, span, trace
@@ -28,6 +29,7 @@ __all__ = [
     "Trace",
     "__version__",
     "init",
+    "instrument",
     "metric",
     "metric_ir",
     "register_metric",
