@@ -70,3 +70,59 @@ def test_pricing_unknown_model_zero() -> None:
 def test_pricing_known_model() -> None:
     cost = estimate_cost_usd("openai/gpt-4o-mini", 1_000_000, 1_000_000)
     assert cost == pytest.approx(0.15 + 0.60)
+
+
+# ---- pairwise -----------------------------------------------------------
+
+from judge_workers.judge.parser import (  # noqa: E402
+    consistent_verdict,
+    pairwise_score,
+    parse_pairwise_response,
+)
+
+
+def test_parse_pairwise_explicit_verdict_a() -> None:
+    raw = "Reasoning here.\nVerdict: A"
+    assert parse_pairwise_response(raw).verdict == "A"
+
+
+def test_parse_pairwise_explicit_verdict_b() -> None:
+    assert parse_pairwise_response("...\nWinner: B").verdict == "B"
+
+
+def test_parse_pairwise_tie() -> None:
+    assert parse_pairwise_response("...\nVerdict: tie").verdict == "tie"
+
+
+def test_parse_pairwise_loose_fallback() -> None:
+    # No labeled line; tail mentions "A" → A.
+    assert parse_pairwise_response("Output A is more faithful overall.").verdict == "A"
+
+
+def test_parse_pairwise_unknown_is_tie() -> None:
+    assert parse_pairwise_response("Verdict: maybe").verdict == "tie"
+
+
+def test_consistent_verdict_decisive_a() -> None:
+    # Original A wins both passes (after swap-normalization).
+    assert consistent_verdict("A", "B") == ("A", 1.0)
+
+
+def test_consistent_verdict_decisive_b() -> None:
+    assert consistent_verdict("B", "A") == ("B", 1.0)
+
+
+def test_consistent_verdict_inconsistent_is_tie() -> None:
+    # Both passes pick "slot A" → judge always picks first slot →
+    # position bias, not a real preference.
+    assert consistent_verdict("A", "A") == ("tie", 0.0)
+
+
+def test_consistent_verdict_with_tie_is_tie() -> None:
+    assert consistent_verdict("A", "tie") == ("tie", 0.0)
+
+
+def test_pairwise_score_mapping() -> None:
+    assert pairwise_score("A") == 1.0
+    assert pairwise_score("B") == 0.0
+    assert pairwise_score("tie") == 0.5

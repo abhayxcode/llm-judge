@@ -170,11 +170,13 @@ class EvalConsumer:
 
     async def _process(self, run_id: str, record_id: str, row_index: int) -> None:
         from judge_workers.judge import (
+            ScoreOutcome,
+            apply_length_control,
             call_judge,
-            parse_pointwise_response,
-            render_prompt,
+            score_pairwise,
+            score_pointwise,
+            self_enhancement,
         )
-        from judge_workers.judge.parser import ScoreParseError, normalize_pointwise
 
         async with self._sessionmaker() as session:
             ctx = await self._load_run_ctx(session, run_id)
@@ -185,111 +187,190 @@ class EvalConsumer:
                 )
                 return
 
-        prompt_vars: dict[str, Any] = {}
-        prompt_vars.update(record.input or {})
-        if record.expected_output is not None:
-            prompt_vars.setdefault("expected_output", record.expected_output)
-        if record.context is not None:
-            prompt_vars.setdefault(
-                "context",
-                record.context if isinstance(record.context, str) else json.dumps(record.context),
-            )
-
+        prompt_vars = self._build_prompt_vars(record)
         scoring_type = ctx.metric_ir.get("scoring_type", "pointwise")
         scale = ctx.metric_ir.get("scale", {}) or {}
         scale_min = float(scale.get("min", 0))
         scale_max = float(scale.get("max", 1))
         judge_config = ctx.metric_ir.get("judge_config", {})
         prompt_template = ctx.metric_ir["prompt_template"]
+        length_control = ctx.metric_ir.get("length_control") or {}
 
         try:
-            rendered = render_prompt(prompt_template, prompt_vars)
-            outcome = await call_judge(rendered, judge_config)
-            try:
-                parsed = parse_pointwise_response(outcome.text)
-                score_norm = normalize_pointwise(parsed.score_raw, scale_min, scale_max)
-                score_raw_str = f"{parsed.score_raw}"
-                reasoning = parsed.reasoning
-                error_attr = ""
-            except ScoreParseError as err:
-                score_norm = 0.0
-                score_raw_str = ""
-                reasoning = f"PARSE_ERROR: {err}\n\n{outcome.text}"
-                error_attr = "parse_error"
+            if scoring_type == "pairwise":
+                outcome: ScoreOutcome = await score_pairwise(
+                    prompt_template=prompt_template,
+                    prompt_vars=prompt_vars,
+                    judge_config=judge_config,
+                    call_judge=call_judge,
+                )
+            else:
+                outcome = await score_pointwise(
+                    prompt_template=prompt_template,
+                    prompt_vars=prompt_vars,
+                    judge_config=judge_config,
+                    scale_min=scale_min,
+                    scale_max=scale_max,
+                    call_judge=call_judge,
+                )
 
-            score_row = {
-                "org_id": "default",
-                "project_id": ctx.project_id,
-                "trace_id": record.record_id,  # offline runs key by record_id
-                "span_id": None,
-                "metric_id": ctx.metric_slug,
-                "metric_version": str(ctx.metric_version),
-                "score": float(score_norm),
-                "score_raw": score_raw_str,
-                "reasoning": reasoning,
-                "label": None,
-                "judge_model": outcome.model,
-                "judge_provider": outcome.provider,
-                "cost_usd": float(outcome.cost_usd),
-                "latency_ms": int(outcome.latency_ms),
-                "self_enhancement_warning": 0,
-                "position_swapped": 0,
-                "consistency": None,
-                "computed_at": datetime.now(UTC),
-                "attributes": {
-                    "run_id": run_id,
-                    "record_id": record_id,
-                    "row_index": str(row_index),
-                    "scoring_type": scoring_type,
-                    **({"error": error_attr} if error_attr else {}),
-                    **(
-                        {"input_tokens": str(outcome.input_tokens)}
-                        if outcome.input_tokens
-                        else {}
-                    ),
-                    **(
-                        {"output_tokens": str(outcome.output_tokens)}
-                        if outcome.output_tokens
-                        else {}
-                    ),
-                    **({"fallback_used": "1"} if outcome.fallback_used else {}),
-                },
-            }
+            # Length control: penalize verbose answers if requested. The
+            # output text used for token estimation depends on scoring
+            # mode — pointwise scores one output, pairwise scores two
+            # so we sum their lengths.
+            output_text = self._output_text(scoring_type, prompt_vars)
+            length_adj = apply_length_control(outcome.score, output_text, length_control)
+            outcome.score = length_adj.score
+
+            # Self-enhancement guard: judge + generator from the same
+            # family inflates scores. We only flag — never drop the row.
+            generator = (
+                prompt_vars.get("generator")
+                or prompt_vars.get("output_model")
+                or prompt_vars.get("model")
+                or ""
+            )
+            self_warn = (
+                1 if self_enhancement(outcome.judge_model, str(generator)) else 0
+            )
+
+            score_row = self._score_row(
+                ctx,
+                record,
+                run_id,
+                row_index,
+                scoring_type,
+                outcome,
+                self_warn=self_warn,
+                length_adj=length_adj,
+            )
             await asyncio.to_thread(self.ch_writer.write_score, score_row)
-            had_error = bool(error_attr)
+            had_error = bool(outcome.error_attr)
         except Exception as err:
             log.error("eval.judge_failed", run_id=run_id, record_id=record_id, err=str(err))
-            error_row = {
-                "org_id": "default",
-                "project_id": ctx.project_id,
-                "trace_id": record.record_id,
-                "span_id": None,
-                "metric_id": ctx.metric_slug,
-                "metric_version": str(ctx.metric_version),
-                "score": 0.0,
-                "score_raw": "",
-                "reasoning": f"JUDGE_ERROR: {err}",
-                "label": None,
-                "judge_model": "",
-                "judge_provider": "",
-                "cost_usd": 0.0,
-                "latency_ms": 0,
-                "self_enhancement_warning": 0,
-                "position_swapped": 0,
-                "consistency": None,
-                "computed_at": datetime.now(UTC),
-                "attributes": {
-                    "run_id": run_id,
-                    "record_id": record_id,
-                    "row_index": str(row_index),
-                    "scoring_type": scoring_type,
-                    "error": "judge_error",
-                },
-            }
+            error_row = self._error_score_row(
+                ctx, record, run_id, row_index, scoring_type, err
+            )
             await asyncio.to_thread(self.ch_writer.write_score, error_row)
             had_error = True
 
         await self._bump_progress(run_id, errored=had_error)
+
+    @staticmethod
+    def _build_prompt_vars(record: _Record) -> dict[str, Any]:
+        vars_: dict[str, Any] = {}
+        vars_.update(record.input or {})
+        if record.expected_output is not None:
+            vars_.setdefault("expected_output", record.expected_output)
+        if record.context is not None:
+            vars_.setdefault(
+                "context",
+                record.context if isinstance(record.context, str) else json.dumps(record.context),
+            )
+        return vars_
+
+    @staticmethod
+    def _output_text(scoring_type: str, prompt_vars: dict[str, Any]) -> str:
+        if scoring_type == "pairwise":
+            a = str(prompt_vars.get("output_a", ""))
+            b = str(prompt_vars.get("output_b", ""))
+            return f"{a}\n{b}"
+        for key in ("output", "answer", "response", "completion"):
+            if key in prompt_vars:
+                return str(prompt_vars[key])
+        return ""
+
+    @staticmethod
+    def _score_row(
+        ctx: _RunCtx,
+        record: _Record,
+        run_id: str,
+        row_index: int,
+        scoring_type: str,
+        outcome: Any,  # ScoreOutcome — Any to dodge a circular import in type hints
+        *,
+        self_warn: int,
+        length_adj: Any,  # LengthAdjustment
+    ) -> dict[str, Any]:
+        attrs: dict[str, str] = {
+            "run_id": run_id,
+            "record_id": record.record_id,
+            "row_index": str(row_index),
+            "scoring_type": scoring_type,
+            "length_mode": str(length_adj.mode),
+            "length_tokens": str(length_adj.tokens_estimate),
+        }
+        if length_adj.delta:
+            attrs["length_delta"] = f"{length_adj.delta:.4f}"
+        if outcome.error_attr:
+            attrs["error"] = outcome.error_attr
+        if outcome.fallback_used:
+            attrs["fallback_used"] = "1"
+        if outcome.input_tokens:
+            attrs["input_tokens"] = str(outcome.input_tokens)
+        if outcome.output_tokens:
+            attrs["output_tokens"] = str(outcome.output_tokens)
+        if self_warn:
+            attrs["self_enhancement"] = "1"
+
+        return {
+            "org_id": "default",
+            "project_id": ctx.project_id,
+            "trace_id": record.record_id,
+            "span_id": None,
+            "metric_id": ctx.metric_slug,
+            "metric_version": str(ctx.metric_version),
+            "score": float(outcome.score),
+            "score_raw": outcome.score_raw,
+            "reasoning": outcome.reasoning,
+            "label": outcome.label,
+            "judge_model": outcome.judge_model,
+            "judge_provider": outcome.judge_provider,
+            "cost_usd": float(outcome.cost_usd),
+            "latency_ms": int(outcome.latency_ms),
+            "self_enhancement_warning": self_warn,
+            "position_swapped": outcome.position_swapped,
+            "consistency": outcome.consistency,
+            "computed_at": datetime.now(UTC),
+            "attributes": attrs,
+        }
+
+    @staticmethod
+    def _error_score_row(
+        ctx: _RunCtx,
+        record: _Record,
+        run_id: str,
+        row_index: int,
+        scoring_type: str,
+        err: Exception,
+    ) -> dict[str, Any]:
+        return {
+            "org_id": "default",
+            "project_id": ctx.project_id,
+            "trace_id": record.record_id,
+            "span_id": None,
+            "metric_id": ctx.metric_slug,
+            "metric_version": str(ctx.metric_version),
+            "score": 0.0,
+            "score_raw": "",
+            "reasoning": f"JUDGE_ERROR: {err}",
+            "label": None,
+            "judge_model": "",
+            "judge_provider": "",
+            "cost_usd": 0.0,
+            "latency_ms": 0,
+            "self_enhancement_warning": 0,
+            "position_swapped": 0,
+            "consistency": None,
+            "computed_at": datetime.now(UTC),
+            "attributes": {
+                "run_id": run_id,
+                "record_id": record.record_id,
+                "row_index": str(row_index),
+                "scoring_type": scoring_type,
+                "error": "judge_error",
+            },
+        }
 
     async def _load_run_ctx(self, session: AsyncSession, run_id: str) -> _RunCtx | None:
         row = (
