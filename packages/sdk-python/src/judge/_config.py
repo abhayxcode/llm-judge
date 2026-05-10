@@ -13,6 +13,7 @@ class Config:
 
     api_key: str | None = None
     endpoint: str = "http://localhost:4318"
+    api_endpoint: str = "http://localhost:4000"
     project: str | None = None
     sample_rate: float = 1.0
     telemetry: bool = False
@@ -28,6 +29,7 @@ def init(
     *,
     api_key: str | None = None,
     endpoint: str | None = None,
+    api_endpoint: str | None = None,
     project: str | None = None,
     sample_rate: float | None = None,
     telemetry: bool | None = None,
@@ -38,7 +40,8 @@ def init(
     Falls back to env vars when args are omitted:
 
     - ``JUDGE_API_KEY``
-    - ``JUDGE_ENDPOINT``
+    - ``JUDGE_ENDPOINT`` — ingest endpoint for traces (default :4318)
+    - ``JUDGE_API_ENDPOINT`` — admin/read API endpoint (default :4000)
     - ``JUDGE_PROJECT``
     """
     global _config
@@ -46,6 +49,9 @@ def init(
         _config = Config(
             api_key=api_key if api_key is not None else os.getenv("JUDGE_API_KEY"),
             endpoint=endpoint or os.getenv("JUDGE_ENDPOINT") or _config.endpoint,
+            api_endpoint=api_endpoint
+            or os.getenv("JUDGE_API_ENDPOINT")
+            or _config.api_endpoint,
             project=project if project is not None else os.getenv("JUDGE_PROJECT"),
             sample_rate=sample_rate if sample_rate is not None else _config.sample_rate,
             telemetry=telemetry if telemetry is not None else _config.telemetry,

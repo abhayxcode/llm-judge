@@ -1,10 +1,9 @@
 from typing import Any
 
 import httpx
+import judge
 import pytest
 import respx
-
-import judge
 from judge._config import reset_for_tests
 
 
