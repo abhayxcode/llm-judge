@@ -43,7 +43,7 @@ def test_trace_records_exception() -> None:
     def boom() -> None:
         raise ValueError("nope")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="nope"):
         boom()
     assert route.called
     import json
